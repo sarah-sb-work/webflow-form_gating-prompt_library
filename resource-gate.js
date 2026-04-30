@@ -523,6 +523,53 @@
     // Click-outside-to-close on the modal overlay.
     var modal = getModal();
     if (modal) modal.addEventListener('click', handleModalOverlayClick);
+
+    // Prompt copy-to-clipboard. Delegated so it works even if the [data-prompt-text]
+    // element is added/replaced by Webflow's CMS bindings after init.
+    document.addEventListener('click', handlePromptCopyClick, true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Prompt copy-to-clipboard (internal-prompt CMS post pages).
+  // ---------------------------------------------------------------------------
+  function handlePromptCopyClick(e) {
+    var btn = e.target.closest('[data-prompt-copy]');
+    if (!btn) return;
+    e.preventDefault();
+    var promptEl = document.querySelector('[data-prompt-text]');
+    if (!promptEl) return;
+    var text = (promptEl.innerText || promptEl.textContent || '').trim();
+    if (!text) return;
+
+    var done = function () {
+      var orig = btn.getAttribute('data-orig-label') || btn.textContent;
+      btn.setAttribute('data-orig-label', orig);
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = orig; }, 1600);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () {
+        legacyCopy(text, done);
+      });
+    } else {
+      legacyCopy(text, done);
+    }
+  }
+
+  function legacyCopy(text, onDone) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'absolute';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      onDone();
+    } catch (e) { /* no-op */ }
   }
 
   // Synthetic tile for direct-link external pages so trackResourceClick can
