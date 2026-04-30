@@ -382,15 +382,40 @@
   // ---------------------------------------------------------------------------
   // Tile click handler (delegated).
   // ---------------------------------------------------------------------------
+  // Detects external destinations resiliently:
+  //   1. data-external-href attribute (preferred — bind to External Link CMS
+  //      field). When set, treated as external and the new tab opens to it.
+  //   2. data-is-external="true" attribute.
+  //   3. Auto-detect: href is an absolute URL pointing to a different origin.
+  function isExternalUrl(href) {
+    if (!href) return false;
+    if (href.indexOf('http://') !== 0 && href.indexOf('https://') !== 0) return false;
+    try {
+      return new URL(href, window.location.href).origin !== window.location.origin;
+    } catch (e) { return false; }
+  }
+
   function handleTileClick(e) {
     var tile = e.target.closest(CONFIG.tileSelector);
     if (!tile) return;
 
     var href = tile.getAttribute('href') || '';
-    var isExternal = tile.getAttribute('data-is-external') === 'true';
+    var externalHref = tile.getAttribute('data-external-href') || '';
+    var dataIsExternal = tile.getAttribute('data-is-external') === 'true';
+    var isExternal = !!externalHref || dataIsExternal || isExternalUrl(href);
+    var actionUrl = externalHref || href;
 
     if (isGateValid()) {
-      // Let the browser navigate normally; just record the click first.
+      // Gate is valid. For external tiles, we still want a new tab even if the
+      // anchor's target attribute isn't set (covers the single-Item setup
+      // where target=_blank can't be conditionally applied). For internal,
+      // let the browser navigate normally.
+      if (isExternal) {
+        e.preventDefault();
+        try { trackResourceClick(tile); } catch (err) {}
+        try { window.open(actionUrl, '_blank', 'noopener'); } catch (err) {}
+        return;
+      }
       try { trackResourceClick(tile); } catch (err) {}
       return;
     }
@@ -399,10 +424,21 @@
     e.preventDefault();
     pendingAction = {
       type: isExternal ? 'external' : 'internal',
-      url: href,
+      url: actionUrl,
       tile: tile,
     };
     showModal();
+  }
+
+  // Close the modal when the user clicks the dark overlay outside the card.
+  // Clears any queued action so a follow-up tile click starts cleanly.
+  function handleModalOverlayClick(e) {
+    var modal = getModal();
+    if (!modal) return;
+    if (e.target === modal) {
+      pendingAction = null;
+      hideModal();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -483,6 +519,10 @@
     // Modal form submit.
     var form = getModalForm();
     if (form) form.addEventListener('submit', handleFormSubmit);
+
+    // Click-outside-to-close on the modal overlay.
+    var modal = getModal();
+    if (modal) modal.addEventListener('click', handleModalOverlayClick);
   }
 
   // Synthetic tile for direct-link external pages so trackResourceClick can
