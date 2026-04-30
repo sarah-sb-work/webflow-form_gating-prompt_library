@@ -46,7 +46,12 @@
     attrFirstKey: 'sb_attribution_first',
     attrLastKey: 'sb_attribution_last',
     // Webflow-side selectors / attributes.
-    tileSelector: '[data-gate="true"]',
+    // Tile selector matches either:
+    //   1. any element with data-gate="true" (canonical convention), OR
+    //   2. any anchor whose class contains "pcard__link" (covers cases where
+    //      Webflow stripped the data-gate attribute when duplicating the
+    //      Collection Item, or auto-suffixed the class on duplication).
+    tileSelector: '[data-gate="true"], a[class*="pcard__link"]',
     gatePageAttr: 'data-gate-page',
     // External-mode marker on a CMS post page: an in-page CTA link with
     // [data-external-cta] whose href is bound to the link-to-prompt CMS field.
