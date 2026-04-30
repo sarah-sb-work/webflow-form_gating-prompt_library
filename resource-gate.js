@@ -305,7 +305,13 @@
   function executePendingAction() {
     var action = pendingAction;
     pendingAction = null;
-    if (!action) return; // Defensive: nothing queued.
+
+    // No queued action — modal opened without a tile click or direct-link
+    // gating context. Just close the modal so the user isn't stuck.
+    if (!action) {
+      hideModal();
+      return;
+    }
 
     // Fire the resource_click custom event for any tracked action. For tile
     // clicks we use the tile's data attributes; for direct-link external
@@ -327,6 +333,9 @@
     } else if (action.type === 'reveal') {
       hideModal();
       revealGatedContent();
+    } else {
+      // Unknown action type — close defensively.
+      hideModal();
     }
   }
 
