@@ -548,11 +548,15 @@
     var text = (promptEl.innerText || promptEl.textContent || '').trim();
     if (!text) return;
 
+    // Target the dedicated label inside the button so the copy-feedback text
+    // change doesn't wipe out the icon child. Falls back to the button itself
+    // when the label isn't present (older button structure).
+    var labelEl = btn.querySelector('[data-prompt-copy-label]') || btn;
     var done = function () {
-      var orig = btn.getAttribute('data-orig-label') || btn.textContent;
-      btn.setAttribute('data-orig-label', orig);
-      btn.textContent = 'Copied';
-      setTimeout(function () { btn.textContent = orig; }, 1600);
+      var orig = labelEl.getAttribute('data-orig-label') || labelEl.textContent;
+      labelEl.setAttribute('data-orig-label', orig);
+      labelEl.textContent = 'Copied';
+      setTimeout(function () { labelEl.textContent = orig; }, 1600);
     };
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
