@@ -1,2 +1,9 @@
 ﻿webflow.txt
 .DS_Store
+
+# Claude Code per-project permissions cache (local-only, contains paths/preferences)
+.claude/
+
+# Design handoff archive (large binary, source of truth lives outside git)
+Prompt Library _ Index _ post.zip
+
