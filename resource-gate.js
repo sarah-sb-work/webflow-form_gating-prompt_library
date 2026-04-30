@@ -431,14 +431,16 @@
   }
 
   // Close the modal when the user clicks the dark overlay outside the card.
-  // Clears any queued action so a follow-up tile click starts cleanly.
+  // Only allowed on the index / non-gated pages — on a CMS post page the modal
+  // is the only path to revealing #gated-content, so click-outside would
+  // strand the user with hidden content underneath.
   function handleModalOverlayClick(e) {
     var modal = getModal();
     if (!modal) return;
-    if (e.target === modal) {
-      pendingAction = null;
-      hideModal();
-    }
+    if (e.target !== modal) return;
+    if (isGatedPage()) return; // can't dismiss the modal on CMS post pages
+    pendingAction = null;
+    hideModal();
   }
 
   // ---------------------------------------------------------------------------
