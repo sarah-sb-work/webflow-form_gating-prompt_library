@@ -280,8 +280,9 @@
     m.setAttribute('hidden', '');
     m.style.display = 'none';
     m.setAttribute('aria-hidden', 'true');
-    var fb = getFallbackContainer();
-    if (fb) fb.setAttribute('hidden', '');
+    // Reset success-state visibility so reopening the modal shows the form
+    // again, not the leftover fallback link from a prior submit.
+    resetFormVisibility();
   }
 
   function showFallbackLink(url) {
@@ -291,6 +292,28 @@
     var a = fb.querySelector('a');
     if (a) { a.setAttribute('href', url); a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener'); }
     fb.removeAttribute('hidden');
+    fb.style.display = '';
+
+    // Hide the form so users see only the success state (fallback link), not
+    // both the lead-capture form AND the fallback CTA simultaneously.
+    var form = getModalForm();
+    if (form) {
+      var formWrapper = form.closest('.w-form') || form;
+      formWrapper.style.display = 'none';
+    }
+  }
+
+  function resetFormVisibility() {
+    var form = getModalForm();
+    if (form) {
+      var formWrapper = form.closest('.w-form') || form;
+      formWrapper.style.display = '';
+    }
+    var fb = getFallbackContainer();
+    if (fb) {
+      fb.setAttribute('hidden', '');
+      fb.style.display = 'none';
+    }
   }
 
   function revealGatedContent() {
