@@ -292,7 +292,10 @@
     var a = fb.querySelector('a');
     if (a) { a.setAttribute('href', url); a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener'); }
     fb.removeAttribute('hidden');
-    fb.style.display = '';
+    // Explicit display value (not '') so we win over any class-level
+    // display:none on .gate-modal__fallback that may have been set in Webflow
+    // to keep the block hidden on initial load.
+    fb.style.display = 'block';
 
     // Hide the form so users see only the success state (fallback link), not
     // both the lead-capture form AND the fallback CTA simultaneously.
