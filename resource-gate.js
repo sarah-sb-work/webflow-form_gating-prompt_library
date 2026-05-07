@@ -448,6 +448,30 @@
     hideModal();
   }
 
+  // Close button (×) inside the modal card.
+  function handleModalCloseClick(e) {
+    var btn = e.target.closest('[data-modal-close]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (isGatedPage()) return; // same constraint — must complete the form
+    pendingAction = null;
+    hideModal();
+  }
+
+  // Esc key closes the modal on non-gated pages.
+  function handleModalEscKey(e) {
+    if (e.key !== 'Escape' && e.keyCode !== 27) return;
+    var modal = getModal();
+    if (!modal) return;
+    // Only react when the modal is actually visible.
+    var isVisible = modal.style.display === 'flex';
+    if (!isVisible) return;
+    if (isGatedPage()) return;
+    pendingAction = null;
+    hideModal();
+  }
+
   // ---------------------------------------------------------------------------
   // Bootstrap.
   // ---------------------------------------------------------------------------
@@ -530,6 +554,10 @@
     // Click-outside-to-close on the modal overlay.
     var modal = getModal();
     if (modal) modal.addEventListener('click', handleModalOverlayClick);
+
+    // Modal close button (×) and Esc key.
+    document.addEventListener('click', handleModalCloseClick, true);
+    document.addEventListener('keydown', handleModalEscKey);
 
     // Prompt copy-to-clipboard. Delegated so it works even if the [data-prompt-text]
     // element is added/replaced by Webflow's CMS bindings after init.
