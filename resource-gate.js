@@ -297,20 +297,36 @@
     // to keep the block hidden on initial load.
     fb.style.display = 'block';
 
-    // Hide the form so users see only the success state (fallback link), not
-    // both the lead-capture form AND the fallback CTA simultaneously.
+    // Hide ONLY the <form> element (not the entire .w-form wrapper) so the
+    // sibling .w-form-done success message can become visible. Then reveal it.
     var form = getModalForm();
     if (form) {
-      var formWrapper = form.closest('.w-form') || form;
-      formWrapper.style.display = 'none';
+      form.style.display = 'none';
+      var wrapper = form.closest('.w-form');
+      if (wrapper) {
+        var done = wrapper.querySelector('.w-form-done');
+        if (done) done.style.display = 'block';
+        // Make sure the error block stays hidden — Webflow's CSS keeps it
+        // hidden by default but be explicit in case classes were edited.
+        var fail = wrapper.querySelector('.w-form-fail');
+        if (fail) fail.style.display = 'none';
+      }
     }
   }
 
   function resetFormVisibility() {
     var form = getModalForm();
     if (form) {
-      var formWrapper = form.closest('.w-form') || form;
-      formWrapper.style.display = '';
+      form.style.display = '';
+      var wrapper = form.closest('.w-form');
+      if (wrapper) {
+        // Restore wrapper display in case any prior code path hid it.
+        wrapper.style.display = '';
+        var done = wrapper.querySelector('.w-form-done');
+        if (done) done.style.display = 'none';
+        var fail = wrapper.querySelector('.w-form-fail');
+        if (fail) fail.style.display = 'none';
+      }
     }
     var fb = getFallbackContainer();
     if (fb) {
