@@ -387,11 +387,25 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Form submit handler.
+  // Form submit handler. Works for both the modal form AND the inline
+  // (legacy LLM Prompt Access) form on external-link CMS post pages.
   // ---------------------------------------------------------------------------
   function handleFormSubmit(e) {
     e.preventDefault();
-    var form = getModalForm();
+    // Prevent Webflow's native form integration handler from also running and
+    // posting the form to its own endpoint. The legacy LLM Prompt Access form
+    // is registered with Webflow's submit handler — without stopImmediate
+    // we'd double-submit (once via Webflow → its endpoint, once via our
+    // HubSpot Forms API call). Listener is registered in capture phase below
+    // so this handler runs first.
+    if (typeof e.stopImmediatePropagation === 'function') {
+      e.stopImmediatePropagation();
+    }
+
+    // Submit can be triggered programmatically (e.g. via the proxy click on a
+    // Link "submit"). e.target is the form for native submit events; fall back
+    // to the modal form for safety.
+    var form = e.target && e.target.tagName === 'FORM' ? e.target : getModalForm();
     if (!form) return;
 
     // Collect visible + hidden form fields.
@@ -412,10 +426,32 @@
     var submitBtn = form.querySelector('[type="submit"]');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.setAttribute('aria-busy', 'true'); }
 
+    // Email field name varies (modal uses "Email", legacy form uses "Email";
+    // some forms might use lowercase). Look up case-insensitively for setGate.
+    var emailForGate = '';
+    for (var k in values) {
+      if (k && k.toLowerCase() === 'email' && values[k]) { emailForGate = values[k]; break; }
+    }
+
+    var isLegacyForm = form.id === 'wf-form-LLM-Prompt-Access';
+
     submitHubSpotForm(values)
       .then(function () {
-        setGate(values.email || '', getCookie('hubspotutk'));
-        executePendingAction();
+        setGate(emailForGate, getCookie('hubspotutk'));
+        if (isLegacyForm) {
+          // Inline form path on external-link CMS post page. Open the
+          // external URL in a new tab and swap to the form's native success
+          // state (Webflow's .w-form-done with the "Click here to open the
+          // GPT" CTA). Don't touch the modal — it isn't the form in play.
+          if (pendingAction && pendingAction.type === 'external' && pendingAction.url) {
+            try { window.open(pendingAction.url, '_blank', 'noopener'); } catch (err) {}
+          }
+          swapLegacyForm();
+          pendingAction = null;
+        } else {
+          // Modal form path — existing flow (navigate / reveal / external+fallback).
+          executePendingAction();
+        }
       })
       .catch(function (err) {
         console.error('[resource-gate] form submit failed:', err);
@@ -607,18 +643,33 @@
 
       if (externalLink) {
         // Direct-link visit to an external-link CMS post.
-        // Always swap the legacy LLM-Prompt-Access form into its
-        // success-message state so the in-page CTA (Click-to-open-GPT) is
-        // visible to users who arrived gate-valid. The form itself is
-        // defunct — the modal handles all gating.
-        swapLegacyForm();
-        if (!isGateValid()) {
-          // Show the modal preemptively so the user gates before they see
-          // or click the CTA. On submit, window.open + fallback fires.
-          pendingAction = { type: 'external', url: externalLink };
-          showModal();
-        } else {
+        //
+        // The CMS template includes the legacy LLM Prompt Access form inline
+        // in the post body, with the same fields as the modal (Email +
+        // firstname + lastname + UTM hidden inputs). The form's success-state
+        // contains the "Click here to open the GPT" CTA from Webflow.
+        //
+        // - Gate valid → swap the legacy form to its success state so the
+        //   user sees the CTA without re-filling the form.
+        // - Gate invalid → leave the legacy form visible and attach our
+        //   submit interceptor (capture phase, so we beat Webflow's native
+        //   form integration). On successful submit the script opens the
+        //   external URL and swaps to the success state.
+        // The modal is NOT shown on these pages — the inline form is the
+        // gate UX for external-link CMS posts.
+        if (isGateValid()) {
+          swapLegacyForm();
           revealGatedContent(); // no-op if the page lacks #gated-content
+        } else {
+          var legacyForm = document.getElementById('wf-form-LLM-Prompt-Access');
+          if (legacyForm) {
+            pendingAction = { type: 'external', url: externalLink };
+            // Capture phase ensures our handler runs before Webflow's
+            // bubble-phase listener; combined with stopImmediatePropagation
+            // inside handleFormSubmit, Webflow's native handler is
+            // suppressed and our HubSpot Forms API call is the sole submit.
+            legacyForm.addEventListener('submit', handleFormSubmit, true);
+          }
         }
       } else {
         // Internal-prompt CMS post. Reveal content if gate valid, otherwise
