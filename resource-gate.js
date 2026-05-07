@@ -572,6 +572,17 @@
     // first- and last-touch data whenever the user eventually submits.
     captureAttribution();
 
+    // Force-hide the fallback container at init. Webflow's [hidden] attribute
+    // can be overridden by class-level display rules (e.g. display:flex on
+    // .gate-modal__fallback), so we set inline display:none to win on
+    // specificity. The fallback only ever appears via showFallbackLink() after
+    // an external-action submit.
+    var initialFallback = getFallbackContainer();
+    if (initialFallback) {
+      initialFallback.setAttribute('hidden', '');
+      initialFallback.style.display = 'none';
+    }
+
     if (isGatedPage()) {
       var externalLink = getExternalLinkOnPage();
 
