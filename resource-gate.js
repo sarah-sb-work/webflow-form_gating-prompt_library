@@ -482,6 +482,42 @@
     hideModal();
   }
 
+  // Submit-click proxy. The "Let's go" CTA may be a Link in Webflow (which
+  // doesn't fire a form submit event when clicked). Catch the click and
+  // dispatch a submit event on the form so handleFormSubmit runs once and only
+  // once regardless of element type. Native submit buttons inside <form> still
+  // dispatch the submit event the normal way; this proxy only matters when the
+  // CTA is a Link or other non-submit element.
+  function handleSubmitProxyClick(e) {
+    var trigger = e.target.closest('.gate-modal__submit');
+    if (!trigger) return;
+    var form = getModalForm();
+    if (!form) return;
+    // If the trigger is already a real submit button inside the form, let the
+    // browser dispatch the submit event itself — don't double-fire.
+    if (typeof trigger.matches === 'function'
+        && trigger.matches('button[type="submit"], input[type="submit"]')
+        && form.contains(trigger)) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    // Use requestSubmit if available (runs validation + dispatches submit);
+    // fall back to dispatching a cancelable submit event manually.
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+    } else {
+      var evt;
+      try {
+        evt = new Event('submit', { bubbles: true, cancelable: true });
+      } catch (err) {
+        evt = document.createEvent('Event');
+        evt.initEvent('submit', true, true);
+      }
+      form.dispatchEvent(evt);
+    }
+  }
+
   // Esc key closes the modal on non-gated pages.
   function handleModalEscKey(e) {
     if (e.key !== 'Escape' && e.keyCode !== 27) return;
@@ -573,6 +609,14 @@
     // Modal form submit.
     var form = getModalForm();
     if (form) form.addEventListener('submit', handleFormSubmit);
+
+    // Defensive submit-click bridge. The "Let's go" CTA inside the modal may be
+    // a Link, Button, or FormButton in Webflow Designer depending on how the
+    // component was last edited. A Link click does NOT dispatch a submit event,
+    // so the listener above never fires and the form appears dead. Catching the
+    // click on .gate-modal__submit (or anything inside it) and routing it
+    // through handleFormSubmit makes submission work regardless of element type.
+    document.addEventListener('click', handleSubmitProxyClick, true);
 
     // Click-outside-to-close on the modal overlay.
     var modal = getModal();
