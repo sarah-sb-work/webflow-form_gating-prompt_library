@@ -608,18 +608,34 @@
   // view. The in-page Click-to-open-GPT CTA lives inside the success message;
   // exposing it lets gate-valid visitors access the resource without re-
   // submitting the form. Idempotent and safe to call on every load.
+  //
+  // Uses !important on display via setProperty so a strong CSS rule on
+  // .header2_form (e.g. display:flex from the form's combo class) cannot
+  // override the inline display:none. Webflow's native form handler is
+  // suppressed by our submit interceptor, so this swap is the only path that
+  // toggles between form / success / error states for the inline form.
   function swapInlineForm() {
-    var formEl = document.getElementById('gate-form-inline');
-    if (!formEl) return;
-    var container = formEl.closest('.w-form');
-    if (!container) return;
-    var formInner = container.querySelector('form#gate-form-inline');
-    var successInner = container.querySelector('.w-form-done');
-    if (formInner) formInner.style.display = 'none';
-    if (successInner) {
-      successInner.style.display = 'block';
-      successInner.setAttribute('aria-hidden', 'false');
+    var form = document.getElementById('gate-form-inline');
+    if (!form) {
+      console.warn('[resource-gate] swapInlineForm: #gate-form-inline not found');
+      return;
     }
+    var wrapper = form.closest('.w-form');
+    if (!wrapper) {
+      console.warn('[resource-gate] swapInlineForm: enclosing .w-form not found');
+      return;
+    }
+    form.style.setProperty('display', 'none', 'important');
+    var done = wrapper.querySelector('.w-form-done');
+    if (done) {
+      done.style.setProperty('display', 'block', 'important');
+      done.setAttribute('aria-hidden', 'false');
+    } else {
+      console.warn('[resource-gate] swapInlineForm: .w-form-done not found inside wrapper', wrapper);
+    }
+    var fail = wrapper.querySelector('.w-form-fail');
+    if (fail) fail.style.setProperty('display', 'none', 'important');
+    console.log('[resource-gate] inline form swapped to success state', { form: form, wrapper: wrapper, done: done });
   }
 
   function init() {
