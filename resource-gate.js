@@ -433,12 +433,12 @@
       if (k && k.toLowerCase() === 'email' && values[k]) { emailForGate = values[k]; break; }
     }
 
-    var isLegacyForm = form.id === 'wf-form-LLM-Prompt-Access';
+    var isInlineForm = form.id === 'gate-form-inline';
 
     submitHubSpotForm(values)
       .then(function () {
         setGate(emailForGate, getCookie('hubspotutk'));
-        if (isLegacyForm) {
+        if (isInlineForm) {
           // Inline form path on external-link CMS post page. Open the
           // external URL in a new tab and swap to the form's native success
           // state (Webflow's .w-form-done with the "Click here to open the
@@ -446,7 +446,7 @@
           if (pendingAction && pendingAction.type === 'external' && pendingAction.url) {
             try { window.open(pendingAction.url, '_blank', 'noopener'); } catch (err) {}
           }
-          swapLegacyForm();
+          swapInlineForm();
           pendingAction = null;
         } else {
           // Modal form path — existing flow (navigate / reveal / external+fallback).
@@ -604,16 +604,16 @@
         || !!document.querySelector('[' + CONFIG.gatePageAttr + '="true"]');
   }
 
-  // Swap the legacy LLM-Prompt-Access form's form view for its success-message
+  // Swap the inline gate-form-inline form's form view for its success-message
   // view. The in-page Click-to-open-GPT CTA lives inside the success message;
-  // exposing it lets users access the resource after the new modal-driven
-  // gate completes. Idempotent and safe to call on every load.
-  function swapLegacyForm() {
-    var legacyFormEl = document.getElementById('wf-form-LLM-Prompt-Access');
-    if (!legacyFormEl) return;
-    var container = legacyFormEl.closest('.w-form');
+  // exposing it lets gate-valid visitors access the resource without re-
+  // submitting the form. Idempotent and safe to call on every load.
+  function swapInlineForm() {
+    var formEl = document.getElementById('gate-form-inline');
+    if (!formEl) return;
+    var container = formEl.closest('.w-form');
     if (!container) return;
-    var formInner = container.querySelector('form#wf-form-LLM-Prompt-Access');
+    var formInner = container.querySelector('form#gate-form-inline');
     var successInner = container.querySelector('.w-form-done');
     if (formInner) formInner.style.display = 'none';
     if (successInner) {
@@ -658,17 +658,17 @@
         // The modal is NOT shown on these pages — the inline form is the
         // gate UX for external-link CMS posts.
         if (isGateValid()) {
-          swapLegacyForm();
+          swapInlineForm();
           revealGatedContent(); // no-op if the page lacks #gated-content
         } else {
-          var legacyForm = document.getElementById('wf-form-LLM-Prompt-Access');
-          if (legacyForm) {
+          var inlineForm = document.getElementById('gate-form-inline');
+          if (inlineForm) {
             pendingAction = { type: 'external', url: externalLink };
             // Capture phase ensures our handler runs before Webflow's
             // bubble-phase listener; combined with stopImmediatePropagation
             // inside handleFormSubmit, Webflow's native handler is
             // suppressed and our HubSpot Forms API call is the sole submit.
-            legacyForm.addEventListener('submit', handleFormSubmit, true);
+            inlineForm.addEventListener('submit', handleFormSubmit, true);
           }
         }
       } else {
