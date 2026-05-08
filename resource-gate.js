@@ -661,15 +661,11 @@
           swapInlineForm();
           revealGatedContent(); // no-op if the page lacks #gated-content
         } else {
-          var inlineForm = document.getElementById('gate-form-inline');
-          if (inlineForm) {
-            pendingAction = { type: 'external', url: externalLink };
-            // Capture phase ensures our handler runs before Webflow's
-            // bubble-phase listener; combined with stopImmediatePropagation
-            // inside handleFormSubmit, Webflow's native handler is
-            // suppressed and our HubSpot Forms API call is the sole submit.
-            inlineForm.addEventListener('submit', handleFormSubmit, true);
-          }
+          // Queue the external action — the document-level submit listener
+          // (registered below in init) will route the gate-form-inline submit
+          // through handleFormSubmit, which reads pendingAction to know to
+          // window.open the external URL after the API call resolves.
+          pendingAction = { type: 'external', url: externalLink };
         }
       } else {
         // Internal-prompt CMS post. Reveal content if gate valid, otherwise
@@ -687,9 +683,21 @@
     // injected by client-side filtering).
     document.addEventListener('click', handleTileClick, true);
 
-    // Modal form submit.
-    var form = getModalForm();
-    if (form) form.addEventListener('submit', handleFormSubmit);
+    // Submit handling — delegated at document level in capture phase. This is
+    // the most defensive binding: it fires before any form-element-attached
+    // listeners (capture beats bubble, document beats inner) and works
+    // regardless of whether the gated form is in the DOM at init-time. We
+    // dispatch on form id so only known gate forms route through our pipeline;
+    // any other forms on the page (subscribe, daily-show, etc.) submit
+    // unchanged via Webflow's native integration.
+    document.addEventListener('submit', function (e) {
+      var form = e.target;
+      if (!form || form.tagName !== 'FORM') return;
+      if (form.id === CONFIG.modalFormId || form.id === 'gate-form-inline') {
+        console.log('[resource-gate] intercepting submit for', form.id);
+        handleFormSubmit(e);
+      }
+    }, true);
 
     // Defensive submit-click bridge. The "Let's go" CTA inside the modal may be
     // a Link, Button, or FormButton in Webflow Designer depending on how the
