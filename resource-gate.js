@@ -615,9 +615,15 @@
   // suppressed by our submit interceptor, so this swap is the only path that
   // toggles between form / success / error states for the inline form.
   function swapInlineForm() {
-    var form = document.getElementById('gate-form-inline');
+    // Use querySelector('form#...') instead of getElementById so we target
+    // the <form> element specifically. Webflow can publish the FormWrapper
+    // div with the same id as the form (or a user can mis-set it in
+    // Designer), and getElementById returns the wrapper first in DOM order.
+    // Hiding the wrapper accidentally also hides the success message inside
+    // it, which is exactly the bug we're fixing here.
+    var form = document.querySelector('form#gate-form-inline');
     if (!form) {
-      console.warn('[resource-gate] swapInlineForm: #gate-form-inline not found');
+      console.warn('[resource-gate] swapInlineForm: <form id="gate-form-inline"> not found');
       return;
     }
     var wrapper = form.closest('.w-form');
