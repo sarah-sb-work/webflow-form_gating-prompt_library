@@ -389,24 +389,40 @@
   function ensureModalSubmitIsButton() {
     var el = document.querySelector('.gate-modal__submit');
     if (!el) return;
-    // Already a real submit input/button? Leave it alone.
-    if (el.matches && el.matches('button[type="submit"], input[type="submit"]')) return;
-    // Already a generic <button>? Just enforce type=submit.
-    if (el.tagName === 'BUTTON') { el.type = 'submit'; return; }
-    // Otherwise it's a Link or div — swap for a real submit button.
+    // Already a real submit input/button? Defensively pin tabindex and leave.
+    if (el.matches && el.matches('button[type="submit"], input[type="submit"]')) {
+      if (el.getAttribute('tabindex') === null) el.setAttribute('tabindex', '0');
+      return;
+    }
+    // Already a generic <button>? Just enforce type=submit + tabindex.
+    if (el.tagName === 'BUTTON') {
+      el.type = 'submit';
+      if (el.getAttribute('tabindex') === null) el.setAttribute('tabindex', '0');
+      return;
+    }
+    // Otherwise it's a Link or div — swap for a real submit <button>.
+    //
+    // Copy ALL attributes except those that don't apply to <button> (href,
+    // target, rel) and the type attribute (we set type=submit explicitly).
+    // Crucially this preserves Webflow's auto-generated id="w-node-..." that
+    // ties the element to its CSS Grid placement rule — dropping that id
+    // breaks alignment (the button shifts to the left edge because Webflow
+    // generates per-element grid-area rules keyed off the w-node id).
     var btn = document.createElement('button');
     btn.type = 'submit';
-    btn.className = el.className;
-    btn.innerHTML = el.innerHTML;
     for (var i = 0; i < el.attributes.length; i++) {
       var a = el.attributes[i];
-      if (a.name.indexOf('data-') === 0
-          || a.name.indexOf('aria-') === 0
-          || a.name === 'role') {
-        btn.setAttribute(a.name, a.value);
-      }
+      if (a.name === 'href' || a.name === 'target' || a.name === 'rel') continue;
+      if (a.name === 'type') continue;
+      try { btn.setAttribute(a.name, a.value); } catch (e) {}
     }
+    btn.innerHTML = el.innerHTML;
+    // Defensive tabindex=0 so the button is reachable on every OS regardless
+    // of browser-specific link-skipping behavior or stray tabindex=-1 carried
+    // over from the original element.
+    btn.setAttribute('tabindex', '0');
     if (el.parentNode) el.parentNode.replaceChild(btn, el);
+    console.log('[resource-gate] converted .gate-modal__submit to <button>; tabIndex=' + btn.tabIndex);
   }
 
   // Inject a visually-hidden <button type="submit"> into a form when no real
