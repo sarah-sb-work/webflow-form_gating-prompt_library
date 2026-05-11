@@ -193,6 +193,25 @@
     });
   }
 
+  // Push an identify call to HubSpot's tracking queue using the email we
+  // stored on the most recent gate submission. Without this, custom events
+  // can land as "unknown contact" — HubSpot ties events to a contact via
+  // the hubspotutk cookie, but the cookie only maps to a contact AFTER a
+  // form submission (or another identify) on this domain. Calling identify
+  // here makes future _hsq events on this page session deterministically
+  // attribute to the known contact, and HubSpot also back-fills any queued
+  // events that have not yet been sent. Silent no-op if no email is stored
+  // (first-time visitor without a submission) — those events stay anonymous
+  // until the user submits, which is unavoidable.
+  function identifyHubspotContact() {
+    var gate = readJSON(localStorage, CONFIG.storageKey);
+    if (!gate || !gate.contactEmail) return;
+    try {
+      window._hsq = window._hsq || [];
+      window._hsq.push(['identify', { email: gate.contactEmail }]);
+    } catch (e) { /* no-op */ }
+  }
+
   // ---------------------------------------------------------------------------
   // HubSpot Forms API submit.
   // ---------------------------------------------------------------------------
@@ -676,6 +695,13 @@
     submitHubSpotForm(values)
       .then(function () {
         setGate(emailForGate, getCookie('hubspotutk'));
+        // Identify the visitor to HubSpot right after we have their email +
+        // the form submission has created/updated a contact. This makes any
+        // events that fire later in this page session (executePendingAction's
+        // tile-click events, the success-state CTA click) tie to the contact
+        // instead of landing as "unknown contact" while the hubspotutk cookie
+        // catches up.
+        identifyHubspotContact();
         if (isInlineForm) {
           // Inline form path on external-link CMS post page. Open the
           // external URL in a new tab and swap to the form's native success
@@ -1006,6 +1032,11 @@
 
     // Index-page topic filter + search bar. Bails out cleanly on other pages.
     initPromptLibraryFilters();
+
+    // Identify the visitor to HubSpot if we have their email from a previous
+    // submission. This must run BEFORE maybeTrackPageLoadView so the page-
+    // load event ties to the contact rather than landing as "unknown contact".
+    identifyHubspotContact();
 
     // Direct-visit page-load Resource click event. Fires only on gated CMS
     // post pages, and only when a prior tile click on the same domain didn't
