@@ -266,12 +266,68 @@
   function getModalForm() { return document.getElementById(CONFIG.modalFormId); }
   function getFallbackContainer() { return document.getElementById(CONFIG.fallbackLinkContainerId); }
 
+  // Tracks the element that had focus when the modal was opened, so we can
+  // restore focus there when the modal closes (WCAG 2.1 SC 2.4.3 Focus Order
+  // / common a11y pattern for dialogs).
+  var lastFocusedBeforeModal = null;
+
+  // Collect every keyboard-focusable element inside the modal, in DOM order.
+  // Excludes elements with tabindex="-1", disabled inputs, hidden inputs, and
+  // elements not currently rendered (offsetParent null).
+  function getFocusableInModal() {
+    var m = getModal();
+    if (!m) return [];
+    var candidates = m.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), ' +
+      'textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    return Array.prototype.filter.call(candidates, function (el) {
+      // Skip elements hidden via display:none or inside a hidden ancestor —
+      // offsetParent returns null for those. Note: this also returns null for
+      // position:fixed elements with no offset parent; that's fine for our
+      // modal since the inputs are inside flow layout.
+      return el.offsetParent !== null
+          || el.tagName === 'INPUT' && el.type === 'hidden' === false;
+    });
+  }
+
   function showModal() {
     var m = getModal();
     if (!m) return;
+    // Save the element that triggered the open so we can restore focus on
+    // close (don't overwrite a previously-saved trigger if the modal is
+    // re-shown without ever being hidden).
+    if (!lastFocusedBeforeModal && document.activeElement && document.activeElement !== document.body) {
+      lastFocusedBeforeModal = document.activeElement;
+    }
     m.removeAttribute('hidden');
     m.style.display = 'flex';
     m.setAttribute('aria-hidden', 'false');
+    // ARIA: a dialog needs role + aria-modal + a label. aria-labelledby
+    // points at the H2 title so screen readers announce "Get the prompt"
+    // when the dialog opens.
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    var title = m.querySelector('.gate-modal__title');
+    if (title) {
+      if (!title.id) title.id = 'gate-modal-title';
+      m.setAttribute('aria-labelledby', title.id);
+    }
+    // Move focus into the modal so subsequent Tab keys cycle within it.
+    // Defer one tick so the display:flex repaint completes and focusable
+    // elements become reachable.
+    setTimeout(function () {
+      var focusables = getFocusableInModal();
+      // Prefer the first form input over the close button so the user is
+      // immediately ready to type. Find the first input/textarea.
+      var preferred = null;
+      for (var i = 0; i < focusables.length; i++) {
+        var el = focusables[i];
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') { preferred = el; break; }
+      }
+      var target = preferred || focusables[0];
+      if (target && typeof target.focus === 'function') target.focus();
+    }, 0);
   }
 
   function hideModal() {
@@ -283,6 +339,59 @@
     // Reset success-state visibility so reopening the modal shows the form
     // again, not the leftover fallback link from a prior submit.
     resetFormVisibility();
+    // Restore focus to the element that opened the modal (e.g. the tile
+    // anchor). Falls back gracefully if that element no longer exists.
+    if (lastFocusedBeforeModal && document.body.contains(lastFocusedBeforeModal)
+        && typeof lastFocusedBeforeModal.focus === 'function') {
+      try { lastFocusedBeforeModal.focus(); } catch (e) {}
+    }
+    lastFocusedBeforeModal = null;
+  }
+
+  // Focus trap. Tab from the last focusable wraps to the first; Shift+Tab
+  // from the first wraps to the last. Only active while the modal is open.
+  function handleModalFocusTrap(e) {
+    if (e.key !== 'Tab' && e.keyCode !== 9) return;
+    var m = getModal();
+    if (!m || m.hasAttribute('hidden') || m.style.display === 'none') return;
+    var focusables = getFocusableInModal();
+    if (focusables.length === 0) return;
+    var first = focusables[0];
+    var last = focusables[focusables.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first || !m.contains(document.activeElement)) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
+  // Webflow's "Let's go" submit element inside the modal is an <a> Link, not
+  // a real <button type="submit">. That means pressing Enter inside any
+  // form field does not submit the form (browsers only auto-submit on Enter
+  // when there's a real submit element). Inject a visually-hidden submit
+  // button so Enter works for keyboard users without affecting the visual
+  // design. The hidden button is removed from the tab order (tabindex=-1)
+  // and hidden from screen readers (aria-hidden) since the visible Link is
+  // the announced submit control.
+  function ensureFormHasSubmitButton(form) {
+    if (!form) return;
+    var existing = form.querySelector('button[type="submit"], input[type="submit"]');
+    if (existing) return;
+    var btn = document.createElement('button');
+    btn.type = 'submit';
+    btn.setAttribute('aria-hidden', 'true');
+    btn.setAttribute('tabindex', '-1');
+    btn.style.cssText = 'position:absolute !important;width:1px !important;height:1px !important;' +
+      'padding:0 !important;margin:-1px !important;overflow:hidden !important;clip:rect(0 0 0 0) !important;' +
+      'white-space:nowrap !important;border:0 !important;';
+    btn.textContent = '';
+    form.appendChild(btn);
   }
 
   function showFallbackLink(url) {
@@ -736,6 +845,21 @@
     // Modal close button (×) and Esc key.
     document.addEventListener('click', handleModalCloseClick, true);
     document.addEventListener('keydown', handleModalEscKey);
+
+    // Focus trap inside the modal — Tab cycles within the modal while open,
+    // restoring focus to the opener on close. WCAG 2.1 SC 2.4.3 / typical
+    // dialog accessibility pattern.
+    document.addEventListener('keydown', handleModalFocusTrap, true);
+
+    // Inject hidden submit buttons into the gate forms so pressing Enter in
+    // any input dispatches a native submit event. Without this, the visible
+    // "Let's go" Link in the modal can't be triggered via keyboard from a
+    // focused input field. Idempotent — skips if a real submit button is
+    // already present (e.g. the inline form's FormButton).
+    var modalFormEl = getModalForm();
+    if (modalFormEl) ensureFormHasSubmitButton(modalFormEl);
+    var inlineFormEl = document.querySelector('form#gate-form-inline');
+    if (inlineFormEl) ensureFormHasSubmitButton(inlineFormEl);
 
     // Prompt copy-to-clipboard. Delegated so it works even if the [data-prompt-text]
     // element is added/replaced by Webflow's CMS bindings after init.
