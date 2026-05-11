@@ -229,17 +229,70 @@
   // ---------------------------------------------------------------------------
   // HubSpot custom event (Enterprise: trackCustomBehavioralEvent).
   // ---------------------------------------------------------------------------
+  // Strip "| Sell Better" / "| sellbetter.xyz" suffix from document.title so
+  // page-load fallbacks for resource_title are the clean resource name.
+  function stripSiteName(t) {
+    return (t || '')
+      .replace(/\s*[|\-—]\s*Sell\s*Better.*$/i, '')
+      .replace(/\s*[|\-—]\s*sellbetter.*$/i, '')
+      .trim();
+  }
+
   function trackResourceClick(tile) {
+    // Extract from tile attributes when a tile element is present (the
+    // common path — tile click on index, related-prompts, or the post-page
+    // success-state CTA which has data-gate/data-external-cta but may not
+    // carry data-resource-slug or data-resource-title in published markup).
+    var slug = '';
+    var title = '';
+    var topics = '';
+    var isExternal = false;
+    var destinationUrl = '';
+
+    if (tile) {
+      slug = tile.getAttribute('data-resource-slug') || '';
+      title = tile.getAttribute('data-resource-title') || '';
+      topics = tile.getAttribute('data-resource-topics') || '';
+      isExternal = tile.getAttribute('data-is-external') === 'true'
+                || tile.getAttribute('data-external-cta') === 'true';
+      destinationUrl = tile.getAttribute('href')
+                    || tile.getAttribute('data-external-href')
+                    || '';
+    }
+
+    // Page-level fallback: fills in any field still empty using inference
+    // from the current CMS post page. Runs whether or not we're on a gated
+    // page, but is most useful on /ai-prompt-library/<slug> direct visits
+    // and for the success-state CTA whose markup lacks resource-* data attrs.
+    if (!slug) {
+      // Last non-empty path segment, e.g. /ai-prompt-library/cold-call-script-generator
+      var parts = window.location.pathname.split('/').filter(Boolean);
+      slug = (parts.length ? parts[parts.length - 1] : '').trim();
+    }
+    if (!title) {
+      title = (document.body && document.body.getAttribute('data-resource-title'))
+            || stripSiteName(document.title);
+    }
+    if (!topics) {
+      topics = (document.body && document.body.getAttribute('data-resource-topics')) || '';
+    }
+    if (!destinationUrl) {
+      // On an external-link CMS post page the external URL is the destination;
+      // on an internal-prompt page or the index the current page URL is.
+      destinationUrl = getExternalLinkOnPage() || window.location.href;
+    }
+    if (!isExternal) {
+      isExternal = !!getExternalLinkOnPage();
+    }
+
     var props = {
-      resource_slug: tile.getAttribute('data-resource-slug') || '',
-      resource_title: tile.getAttribute('data-resource-title') || '',
-      destination_url: tile.getAttribute('href') || '',
-      is_external: tile.getAttribute('data-is-external') === 'true',
-      // CSV of topic slugs from the CMS item's content-topics (multi-reference).
-      // Webflow renders this as a CSV via a comma-joined collection list bound
-      // to a data attribute on the tile.
-      topics: tile.getAttribute('data-resource-topics') || '',
+      resource_slug: slug,
+      resource_title: title,
+      destination_url: destinationUrl,
+      is_external: isExternal,
+      topics: topics,
     };
+
     try {
       window._hsq = window._hsq || [];
       window._hsq.push(['trackCustomBehavioralEvent', {
@@ -257,6 +310,22 @@
         window.dataLayer.push({ event: 'resource_click', ...props });
       }
     } catch (e) { /* no-op */ }
+  }
+
+  // Fire a Resource click event on page load for direct visits to CMS post
+  // pages (someone arrived from email, social, search, etc., without going
+  // through a tile click on the index). Skipped if the prior tile click on
+  // this domain already fired an event for this navigation — flag is set in
+  // handleTileClick / executePendingAction below and cleared on first read.
+  function maybeTrackPageLoadView() {
+    if (!isGatedPage()) return;
+    try {
+      if (sessionStorage.getItem('sb_skip_view_event') === '1') {
+        sessionStorage.removeItem('sb_skip_view_event');
+        return;
+      }
+    } catch (e) { /* sessionStorage may be unavailable in some contexts */ }
+    try { trackResourceClick(null); } catch (e) { /* no-op */ }
   }
 
   // ---------------------------------------------------------------------------
@@ -541,6 +610,9 @@
       // Don't auto-close the modal; user can dismiss manually after confirming
       // the new tab opened, or click the fallback link.
     } else if (action.type === 'internal') {
+      // Internal navigation after modal submit — same dedupe flag as
+      // handleTileClick so the destination page doesn't double-count.
+      try { sessionStorage.setItem('sb_skip_view_event', '1'); } catch (e) {}
       hideModal();
       window.location.href = action.url;
     } else if (action.type === 'reveal') {
@@ -665,7 +737,11 @@
         try { window.open(actionUrl, '_blank', 'noopener'); } catch (err) {}
         return;
       }
+      // Internal tile click — fires event, then browser navigates. Flag the
+      // destination page to skip its page-load view event so we don't
+      // double-count this navigation.
       try { trackResourceClick(tile); } catch (err) {}
+      try { sessionStorage.setItem('sb_skip_view_event', '1'); } catch (err) {}
       return;
     }
 
@@ -930,6 +1006,11 @@
 
     // Index-page topic filter + search bar. Bails out cleanly on other pages.
     initPromptLibraryFilters();
+
+    // Direct-visit page-load Resource click event. Fires only on gated CMS
+    // post pages, and only when a prior tile click on the same domain didn't
+    // already fire an event for this navigation (dedupe flag in sessionStorage).
+    maybeTrackPageLoadView();
   }
 
   // ---------------------------------------------------------------------------
