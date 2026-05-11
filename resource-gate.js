@@ -771,6 +771,64 @@
     var activeTopics = []; // empty = "All" (no topic filter applied)
     var searchQuery = '';
 
+    // Dynamically rebuild the topic pills from the topic chips that actually
+    // appear on cards in the Collection List. This ensures pills track the
+    // CMS Content Topics collection: a topic only shows up as a pill if at
+    // least one ai-prompt-library item is tagged with it. Topics with zero
+    // items (e.g. Discovery when no prompt has been tagged Discovery yet)
+    // are simply absent from the pill bar.
+    function rebuildPillsFromCards() {
+      if (!pillContainer) return;
+      var cards = getCards();
+      // Map of lowercased topic key → first-seen display casing, so we
+      // de-dupe case-insensitively but render the topic with its CMS casing.
+      var topicMap = {};
+      cards.forEach(function (card) {
+        Array.prototype.forEach.call(card.querySelectorAll('.pcard__topic'), function (el) {
+          var text = (el.textContent || '').trim();
+          if (!text) return;
+          var key = text.toLowerCase();
+          if (!topicMap[key]) topicMap[key] = text;
+        });
+      });
+
+      // Borrow the existing pill template's classes so the rebuilt pills
+      // inherit whatever styling Webflow applies. Fall back to a sensible
+      // default if no template pill is present.
+      var templatePill = pillContainer.querySelector('[data-topic]:not([data-topic="all"])');
+      var pillClass = templatePill
+        ? templatePill.className.replace(/\bis-active\b/g, '').replace(/\s+/g, ' ').trim()
+        : 'prompt-library__pill w-button';
+
+      // Clear all existing pills and rebuild from scratch.
+      pillContainer.innerHTML = '';
+
+      // "All" pill first, active by default since no topic filter is applied.
+      var allPill = document.createElement('a');
+      allPill.setAttribute('data-topic', 'all');
+      allPill.setAttribute('href', '#');
+      allPill.className = pillClass + ' is-active';
+      allPill.textContent = 'All';
+      pillContainer.appendChild(allPill);
+
+      // Add one pill per unique topic, alphabetically sorted for predictable
+      // ordering. (If a specific order matters later we can match the CMS
+      // collection's display order via the Data API — overkill for v1.)
+      var keys = Object.keys(topicMap).sort(function (a, b) {
+        return topicMap[a].localeCompare(topicMap[b]);
+      });
+      keys.forEach(function (key) {
+        var display = topicMap[key];
+        var slug = key.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+        var pill = document.createElement('a');
+        pill.setAttribute('data-topic', slug);
+        pill.setAttribute('href', '#');
+        pill.className = pillClass;
+        pill.textContent = display;
+        pillContainer.appendChild(pill);
+      });
+    }
+
     function cardTopicTexts(card) {
       return Array.prototype.map.call(
         card.querySelectorAll('.pcard__topic'),
@@ -821,6 +879,14 @@
     }
 
     if (pillContainer) {
+      // Replace any hardcoded pills with a dynamic set derived from the
+      // topic chips on the cards present on the page. This runs once at
+      // init — if cards are added/removed after page load (rare on this
+      // index but possible with future enhancements), call this again.
+      rebuildPillsFromCards();
+
+      // Delegated click handler. Bound on the container, so it catches
+      // clicks on any pill regardless of when it was inserted.
       pillContainer.addEventListener('click', function (e) {
         var pill = e.target.closest('[data-topic]');
         if (!pill) return;
