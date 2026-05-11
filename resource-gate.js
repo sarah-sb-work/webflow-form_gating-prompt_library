@@ -371,14 +371,55 @@
     }
   }
 
-  // Webflow's "Let's go" submit element inside the modal is an <a> Link, not
-  // a real <button type="submit">. That means pressing Enter inside any
-  // form field does not submit the form (browsers only auto-submit on Enter
-  // when there's a real submit element). Inject a visually-hidden submit
-  // button so Enter works for keyboard users without affecting the visual
-  // design. The hidden button is removed from the tab order (tabindex=-1)
-  // and hidden from screen readers (aria-hidden) since the visible Link is
-  // the announced submit control.
+  // Convert the visible .gate-modal__submit element from an <a> Link (or any
+  // non-button element) into a real <button type="submit">.
+  //
+  // Why: an <a href="#"> is technically focusable, but macOS and Safari (with
+  // default keyboard navigation settings) skip links during Tab traversal —
+  // they only stop on form fields and explicit buttons. Users on Mac literally
+  // cannot tab to the "Let's go" Link. A <button type="submit"> is universally
+  // tabbable on every OS/browser, natively triggers form submission on Enter
+  // and Space, and is announced correctly by screen readers without needing
+  // role="button" overrides.
+  //
+  // Preserves the existing classes (so visual styling is unchanged), inner
+  // text/markup (so any icon/arrow inside survives), and any data-/aria-/role
+  // attributes. The proxy click handler already detects real submit buttons
+  // and lets the browser dispatch the submit event naturally — no double-fire.
+  function ensureModalSubmitIsButton() {
+    var el = document.querySelector('.gate-modal__submit');
+    if (!el) return;
+    // Already a real submit input/button? Leave it alone.
+    if (el.matches && el.matches('button[type="submit"], input[type="submit"]')) return;
+    // Already a generic <button>? Just enforce type=submit.
+    if (el.tagName === 'BUTTON') { el.type = 'submit'; return; }
+    // Otherwise it's a Link or div — swap for a real submit button.
+    var btn = document.createElement('button');
+    btn.type = 'submit';
+    btn.className = el.className;
+    btn.innerHTML = el.innerHTML;
+    for (var i = 0; i < el.attributes.length; i++) {
+      var a = el.attributes[i];
+      if (a.name.indexOf('data-') === 0
+          || a.name.indexOf('aria-') === 0
+          || a.name === 'role') {
+        btn.setAttribute(a.name, a.value);
+      }
+    }
+    if (el.parentNode) el.parentNode.replaceChild(btn, el);
+  }
+
+  // Inject a visually-hidden <button type="submit"> into a form when no real
+  // submit element is present. Defensive backstop for forms whose visible
+  // submit control is a Link/div — without a real submit button, pressing
+  // Enter in any input does nothing. The hidden button is removed from the
+  // tab order (tabindex=-1) and hidden from screen readers (aria-hidden) so
+  // it never appears in keyboard navigation or aria announcements.
+  //
+  // After ensureModalSubmitIsButton runs, the modal form has a real visible
+  // submit button so this becomes a no-op for the modal. Still called for
+  // the inline form (which already has a Webflow FormButton, also a no-op)
+  // and any future gate form that might lack one.
   function ensureFormHasSubmitButton(form) {
     if (!form) return;
     var existing = form.querySelector('button[type="submit"], input[type="submit"]');
@@ -851,11 +892,17 @@
     // dialog accessibility pattern.
     document.addEventListener('keydown', handleModalFocusTrap, true);
 
-    // Inject hidden submit buttons into the gate forms so pressing Enter in
-    // any input dispatches a native submit event. Without this, the visible
-    // "Let's go" Link in the modal can't be triggered via keyboard from a
-    // focused input field. Idempotent — skips if a real submit button is
-    // already present (e.g. the inline form's FormButton).
+    // Convert the modal's "Let's go" submit (an <a> Link by default) into a
+    // real <button type="submit">. This fixes the Mac/Safari Tab-skips-links
+    // accessibility bug and makes the submit reachable on every OS. Run
+    // before ensureFormHasSubmitButton so the modal form will see a real
+    // submit element and skip the hidden-backstop injection.
+    ensureModalSubmitIsButton();
+
+    // Inject hidden submit buttons into any gate form that still lacks one
+    // so pressing Enter in any input dispatches a native submit event.
+    // Idempotent — no-op for the modal form after ensureModalSubmitIsButton,
+    // and no-op for the inline form which has a Webflow FormButton already.
     var modalFormEl = getModalForm();
     if (modalFormEl) ensureFormHasSubmitButton(modalFormEl);
     var inlineFormEl = document.querySelector('form#gate-form-inline');
