@@ -740,6 +740,136 @@
     // Prompt copy-to-clipboard. Delegated so it works even if the [data-prompt-text]
     // element is added/replaced by Webflow's CMS bindings after init.
     document.addEventListener('click', handlePromptCopyClick, true);
+
+    // Index-page topic filter + search bar. Bails out cleanly on other pages.
+    initPromptLibraryFilters();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Index page: topic filter (pills) + free-text search bar.
+  //
+  // The filter pills carry data-topic="<slug>" but the cards' data-resource-
+  // topics attribute is currently empty in published HTML, so we match by
+  // visible chip text instead — pill display text against each card's
+  // .pcard__topic chip text content. Case-insensitive substring match makes
+  // "Prospecting" pill match a card with "Prospecting Generic" chip.
+  //
+  // Search filters the same cards on the same keystrokes — case-insensitive
+  // substring search across title, blurb, author name, and topic chips.
+  //
+  // No-ops on any page where neither [data-topic-filter] nor [data-prompt-
+  // search] is present.
+  // ---------------------------------------------------------------------------
+  function initPromptLibraryFilters() {
+    var pillContainer = document.querySelector('[data-topic-filter]');
+    var searchBar = document.querySelector('[data-prompt-search]');
+    if (!pillContainer && !searchBar) return;
+
+    var cardSelector = '.prompt-library_collection-list .w-dyn-item';
+    function getCards() { return Array.prototype.slice.call(document.querySelectorAll(cardSelector)); }
+
+    var activeTopics = []; // empty = "All" (no topic filter applied)
+    var searchQuery = '';
+
+    function cardTopicTexts(card) {
+      return Array.prototype.map.call(
+        card.querySelectorAll('.pcard__topic'),
+        function (el) { return (el.textContent || '').trim().toLowerCase(); }
+      );
+    }
+
+    function cardHaystack(card) {
+      var bits = [];
+      var title = card.querySelector('.pcard__title');
+      var blurb = card.querySelector('.pcard__blurb');
+      var author = card.querySelector('.pcard__author-name');
+      if (title) bits.push(title.textContent || '');
+      if (blurb) bits.push(blurb.textContent || '');
+      if (author) bits.push(author.textContent || '');
+      cardTopicTexts(card).forEach(function (t) { bits.push(t); });
+      return bits.join(' ').toLowerCase();
+    }
+
+    function applyFilters() {
+      var q = searchQuery.trim().toLowerCase();
+      var cards = getCards();
+      cards.forEach(function (card) {
+        var visible = true;
+        if (activeTopics.length > 0) {
+          var topics = cardTopicTexts(card);
+          visible = activeTopics.some(function (active) {
+            return topics.some(function (t) { return t === active || t.indexOf(active) !== -1 || active.indexOf(t) !== -1; });
+          });
+        }
+        if (visible && q) {
+          visible = cardHaystack(card).indexOf(q) !== -1;
+        }
+        card.style.display = visible ? '' : 'none';
+      });
+    }
+
+    function updatePillUI() {
+      if (!pillContainer) return;
+      var pills = pillContainer.querySelectorAll('[data-topic]');
+      Array.prototype.forEach.call(pills, function (pill) {
+        var slug = pill.getAttribute('data-topic');
+        var label = (pill.textContent || '').trim().toLowerCase();
+        var isActive = (slug === 'all' && activeTopics.length === 0)
+                    || (slug !== 'all' && activeTopics.indexOf(label) !== -1);
+        pill.classList.toggle('is-active', isActive);
+      });
+    }
+
+    if (pillContainer) {
+      pillContainer.addEventListener('click', function (e) {
+        var pill = e.target.closest('[data-topic]');
+        if (!pill) return;
+        e.preventDefault();
+        var slug = pill.getAttribute('data-topic');
+        var label = (pill.textContent || '').trim().toLowerCase();
+        if (slug === 'all') {
+          activeTopics = [];
+        } else {
+          var idx = activeTopics.indexOf(label);
+          if (idx === -1) activeTopics.push(label);
+          else activeTopics.splice(idx, 1);
+        }
+        updatePillUI();
+        applyFilters();
+      });
+    }
+
+    if (searchBar) {
+      // The Webflow markup is a styled <div> with a text-placeholder <div> and
+      // a "Search" button <div>. Swap the placeholder div for a real <input>
+      // so the user can actually type into it.
+      var textDiv = searchBar.querySelector('.prompt-library__search-text');
+      var inputEl = searchBar.querySelector('input.prompt-library__search-input');
+      if (!inputEl && textDiv) {
+        inputEl = document.createElement('input');
+        inputEl.type = 'text';
+        inputEl.placeholder = (textDiv.textContent || '').trim() || 'Search...';
+        inputEl.className = 'prompt-library__search-input';
+        inputEl.style.cssText = 'background:transparent;border:none;outline:none;font:inherit;color:inherit;flex:1;width:100%;padding:0;';
+        textDiv.parentNode.replaceChild(inputEl, textDiv);
+      }
+      if (inputEl) {
+        inputEl.addEventListener('input', function () {
+          searchQuery = inputEl.value;
+          applyFilters();
+        });
+        inputEl.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); applyFilters(); }
+        });
+      }
+      var submitBtn = searchBar.querySelector('.prompt-library__search-submit');
+      if (submitBtn) {
+        submitBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          applyFilters();
+        });
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
