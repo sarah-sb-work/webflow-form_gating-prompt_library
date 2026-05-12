@@ -41,6 +41,13 @@
     // Internal name of the HubSpot custom event. Format pe{portalId}_<name>.
     // Confirm and update after creating the event in HubSpot.
     customEventName: 'pe21795561_resource_click',
+    // Default value for the recent_snack_id hidden HubSpot field. The legacy
+    // LLM Prompt Access form embed shipped this value baked into the input
+    // default; HubSpot's Forms API doesn't apply hidden-field defaults so
+    // we send it explicitly via attributionFields() on every submission.
+    // Not used by HubSpot for contact matching — it's a marketing tracking
+    // attribute. Update if marketing wants a different value.
+    recentSnackId: '148',
     gateTtlDays: 7,
     storageKey: 'sb_gate_v1',
     attrFirstKey: 'sb_attribution_first',
@@ -171,6 +178,12 @@
     UTM_KEYS.forEach(function (k) {
       fields[k] = (a.last.utm && a.last.utm[k]) || (a.first.utm && a.first.utm[k]) || '';
     });
+
+    // recent_snack_id — legacy marketing tracking field. The legacy LLM Prompt
+    // Access form embed had this baked in as an input default value, but the
+    // HubSpot Forms API doesn't apply hidden-field defaults, so we send the
+    // value explicitly on every submission from the modal and inline forms.
+    if (CONFIG.recentSnackId) fields.recent_snack_id = CONFIG.recentSnackId;
 
     return fields;
   }
