@@ -207,21 +207,32 @@
   }
 
   // Push an identify call to HubSpot's tracking queue using the email we
-  // stored on the most recent gate submission. Without this, custom events
-  // can land as "unknown contact" — HubSpot ties events to a contact via
-  // the hubspotutk cookie, but the cookie only maps to a contact AFTER a
-  // form submission (or another identify) on this domain. Calling identify
-  // here makes future _hsq events on this page session deterministically
-  // attribute to the known contact, and HubSpot also back-fills any queued
-  // events that have not yet been sent. Silent no-op if no email is stored
-  // (first-time visitor without a submission) — those events stay anonymous
-  // until the user submits, which is unavoidable.
+  // stored on the most recent gate submission, followed by a trackPageView
+  // to actually flush the identification. Without the trackPageView,
+  // identify() queues the email but doesn't tie subsequent custom events
+  // to the contact in the same page session — that's the cause of the
+  // "unknown contact" events that arrive with all the resource properties
+  // populated but no contact attached.
+  //
+  // HubSpot's tracking script auto-fires a trackPageView on script load,
+  // but it fires before our identify is queued, so it doesn't help. Our
+  // explicit trackPageView after the identify ensures the identification
+  // is applied before any custom events in this session are processed.
+  //
+  // Silent no-op if no email is stored (first-time visitor without a
+  // submission) — those events stay anonymous until the user submits,
+  // which is unavoidable. HubSpot back-attributes anonymous events to
+  // the contact via the persistent hutk cookie once they do submit.
   function identifyHubspotContact() {
     var gate = readJSON(localStorage, CONFIG.storageKey);
     if (!gate || !gate.contactEmail) return;
     try {
       window._hsq = window._hsq || [];
       window._hsq.push(['identify', { email: gate.contactEmail }]);
+      // Flush the identification. Without this trackPageView, the identify()
+      // above queues but doesn't actually associate the visitor with the
+      // contact record for subsequent events in this page session.
+      window._hsq.push(['trackPageView']);
     } catch (e) { /* no-op */ }
   }
 
