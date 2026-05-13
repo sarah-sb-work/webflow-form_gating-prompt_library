@@ -336,6 +336,24 @@
       topics: topics,
     };
 
+    // Per-session per-resource dedupe. The same resource can be engaged with
+    // multiple ways in a single session — page view, CTA click on the success
+    // state, re-clicking a tile, etc. Marketing wants to know who's interested,
+    // not the raw click count, so we fire exactly one Resource click per slug
+    // per browser session. Re-fires only after the session storage is cleared
+    // (browser closed, new tab on Safari, etc.). The dedupe key includes the
+    // event name so swapping the event later doesn't collide with cached keys.
+    if (slug) {
+      try {
+        var dedupeKey = 'sb_evt_' + CONFIG.customEventName + '_' + slug;
+        if (sessionStorage.getItem(dedupeKey) === '1') {
+          console.log('[resource-gate] resource_click already fired this session for "' + slug + '" — skipping duplicate');
+          return;
+        }
+        sessionStorage.setItem(dedupeKey, '1');
+      } catch (e) { /* sessionStorage unavailable in some contexts — fire anyway */ }
+    }
+
     try {
       window._hsq = window._hsq || [];
       window._hsq.push(['trackCustomBehavioralEvent', {
