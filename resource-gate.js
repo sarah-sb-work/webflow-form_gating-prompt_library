@@ -257,25 +257,39 @@
   // ---------------------------------------------------------------------------
   // HubSpot Forms API submit.
   //
-  // Form 24210d30 in HubSpot is configured with legitimate_interest as the
-  // data-privacy basis and two subscription type IDs. The Forms API's
-  // legitimateInterest schema accepts only ONE subscriptionTypeId per call,
-  // so to opt the contact into both subscriptions we fire N sequential POSTs
-  // (one per subscription). Sequential, not parallel, so HubSpot's
-  // contact-creation path sees the same contact twice rather than racing
-  // two contact-creates (which could produce duplicates).
+  // Form 24210d30 is configured in HubSpot with legitimate_interest basis
+  // and two subscription type IDs. The documented Forms API
+  // legitimateInterest schema accepts only a single subscriptionTypeId
+  // per call, but live-testing confirmed HubSpot's API also accepts an
+  // undocumented PLURAL field "subscriptionTypeIds" as an array — when
+  // present, the contact is opted into every subscription in one shot,
+  // legitimate-interest basis preserved, single submission record on the
+  // contact's timeline. This is what we use.
   //
-  // HubSpot deduplicates by email — the contact gets a single record with
-  // N entries on its form-submissions timeline (one per subscription
-  // opt-in), each showing legitimate_interest as the legal basis.
+  // Schema used:
+  //   "legalConsentOptions": {
+  //     "legitimateInterest": {
+  //       "value": true,
+  //       "subscriptionTypeIds": [50372401, 216996842],
+  //       "legalBasis": "LEAD",
+  //       "text": "..."
+  //     }
+  //   }
   //
-  // Tried option-a path (consent.communications array in one call) but
-  // HubSpot silently drops the consent block when the form is configured
-  // for legitimate_interest — contact was created, but no subscriptions
-  // applied. So sequential legitimateInterest calls is the only path.
+  // Other paths tested and rejected/silent-dropped:
+  // - consent.communications array → 200 OK but subscriptions NOT applied
+  //   (HubSpot enforces the form's configured legal basis; the form is
+  //   set to legitimate_interest, so any consent block is silently dropped)
+  // - top-level legitimateInterest array → 400 error from HubSpot
+  // - sequential single-id calls → works, but produces N timeline records
   //
-  // If CONFIG.subscriptionTypeIds is empty, falls back to a single
-  // submission with no legalConsentOptions block.
+  // Caveat: plural subscriptionTypeIds is undocumented. If HubSpot ever
+  // tightens schema validation, this could break — at which point the
+  // fallback is to switch back to N sequential single-id calls. The
+  // commit history shows that pattern (see v1.0.31).
+  //
+  // If CONFIG.subscriptionTypeIds is empty, the submit goes out without
+  // a legalConsentOptions block at all.
   // ---------------------------------------------------------------------------
   function submitHubSpotForm(formFieldValues) {
     var url = 'https://api.hsforms.com/submissions/v3/integration/submit/'
@@ -286,49 +300,37 @@
       return { name: name, value: formFieldValues[name] == null ? '' : String(formFieldValues[name]) };
     });
 
-    var context = {
-      hutk: getCookie('hubspotutk') || undefined,
-      pageUri: window.location.href,
-      pageName: document.title,
+    var payload = {
+      fields: fields,
+      context: {
+        hutk: getCookie('hubspotutk') || undefined,
+        pageUri: window.location.href,
+        pageName: document.title,
+      },
     };
 
-    function postOne(subscriptionTypeId) {
-      var payload = { fields: fields, context: context };
-      if (subscriptionTypeId) {
-        payload.legalConsentOptions = {
-          legitimateInterest: {
-            value: true,
-            subscriptionTypeId: subscriptionTypeId,
-            legalBasis: CONFIG.subscriptionLegalBasis || 'LEAD',
-            text: CONFIG.subscriptionOptInText || '',
-          },
-        };
-      }
-      return fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).then(function (resp) {
-        if (!resp.ok) {
-          return resp.text().then(function (t) { throw new Error('HubSpot ' + resp.status + ': ' + t); });
-        }
-        return resp.json();
-      });
+    var subIds = Array.isArray(CONFIG.subscriptionTypeIds) ? CONFIG.subscriptionTypeIds : [];
+    if (subIds.length > 0) {
+      payload.legalConsentOptions = {
+        legitimateInterest: {
+          value: true,
+          subscriptionTypeIds: subIds.slice(), // copy so external CONFIG mutations don't reach the payload
+          legalBasis: CONFIG.subscriptionLegalBasis || 'LEAD',
+          text: CONFIG.subscriptionOptInText || '',
+        },
+      };
     }
 
-    var subIds = Array.isArray(CONFIG.subscriptionTypeIds) ? CONFIG.subscriptionTypeIds : [];
-    if (subIds.length === 0) {
-      // No subscriptions configured — single submit with no consent block.
-      return postOne(null);
-    }
-    // Sequential chain: each submission completes before the next starts.
-    var chain = postOne(subIds[0]);
-    for (var i = 1; i < subIds.length; i++) {
-      (function (sid) {
-        chain = chain.then(function () { return postOne(sid); });
-      })(subIds[i]);
-    }
-    return chain;
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(function (resp) {
+      if (!resp.ok) {
+        return resp.text().then(function (t) { throw new Error('HubSpot ' + resp.status + ': ' + t); });
+      }
+      return resp.json();
+    });
   }
 
   // ---------------------------------------------------------------------------
