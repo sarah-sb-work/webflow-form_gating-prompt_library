@@ -51,16 +51,19 @@
     // GDPR / data privacy and consent. The HubSpot rendered embed form
     // auto-applies these subscription opt-ins; the Forms API does NOT,
     // so we send them ourselves. Form 24210d30 ("WF<>HS Lead Magnet | AI
-    // Prompts") is configured with legitimate_interest basis and these
-    // two subscription type IDs (Sell Better Daily and Sell Better Weekly,
-    // in some order). Each form submit fires two sequential Forms API
-    // submissions, one per subscription ID, each with its own
-    // legitimateInterest block. The contact only gets one record (HubSpot
-    // deduplicates by email) but two form-submission timeline entries
-    // showing the legitimate-interest opt-in for each subscription.
-    legitimateInterestSubscriptionIds: [50372401, 216996842],
-    legitimateInterestLegalBasis: 'LEAD',
-    legitimateInterestText: 'By submitting this form, you agree to receive communications from Sell Better and their sponsors. For information on how to unsubscribe, as well as our privacy practices, please review our Privacy Policy.',
+    // Prompts") is set up with these two subscription type IDs (Sell
+    // Better Daily and Sell Better Weekly, in some order).
+    //
+    // We send both opt-ins in a SINGLE submission via the consent.
+    // communications array (one API call, one timeline entry per actual
+    // user submit). Note: HubSpot's compliance reporting will categorize
+    // these opt-ins as "Consent" rather than "Legitimate Interest" even
+    // though the embed form is configured for legitimate_interest — the
+    // Forms API's legitimateInterest schema only accepts a single
+    // subscription per call, and the team prioritized single-submission
+    // semantics over preserving the legal-basis label.
+    subscriptionTypeIds: [50372401, 216996842],
+    subscriptionOptInText: 'By submitting this form, you agree to receive communications from Sell Better and their sponsors. For information on how to unsubscribe, as well as our privacy practices, please review our Privacy Policy.',
     gateTtlDays: 7,
     storageKey: 'sb_gate_v1',
     attrFirstKey: 'sb_attribution_first',
@@ -252,20 +255,21 @@
   // ---------------------------------------------------------------------------
   // HubSpot Forms API submit.
   //
-  // Form 24210d30 is configured in HubSpot with legitimate_interest as the
-  // data-privacy basis and two subscription type IDs (Sell Better Daily and
-  // Sell Better Weekly). The HubSpot rendered embed auto-applies these on
-  // submit; the Forms API does not — we have to send a legalConsentOptions
-  // block per submission, and the block only takes ONE subscriptionTypeId
-  // per call. So for a single user submit we fire N sequential Forms API
-  // submissions (one per subscription ID), each carrying its own
-  // legitimateInterest block. HubSpot deduplicates by email so the contact
-  // only gets one record, but the form-submissions timeline shows one
-  // entry per subscription opt-in (which is what marketing wants — proof
-  // of legitimate-interest opt-in per subscription).
+  // Sends one POST to the Forms API with both subscription opt-ins bundled
+  // in legalConsentOptions.consent.communications. Single submission per
+  // user action; one entry on the contact's form-submissions timeline.
   //
-  // If CONFIG.legitimateInterestSubscriptionIds is empty, falls back to a
-  // single submission with no legalConsentOptions block (legacy behavior).
+  // Note on legal basis: the embed-form equivalent is configured for
+  // legitimate_interest, but the Forms API's legitimateInterest schema
+  // only accepts a single subscriptionTypeId per call. We use the consent
+  // block instead so we can pass an array of communications in one call.
+  // HubSpot will categorize these subscription opt-ins as "Consent" basis
+  // in its data-privacy reporting (not "Legitimate interest"). The user-
+  // facing behavior is identical — subscribed to both lists, unsubscribe
+  // works the same way.
+  //
+  // If CONFIG.subscriptionTypeIds is empty, falls back to a submission
+  // with no legalConsentOptions block.
   // ---------------------------------------------------------------------------
   function submitHubSpotForm(formFieldValues) {
     var url = 'https://api.hsforms.com/submissions/v3/integration/submit/'
@@ -276,53 +280,39 @@
       return { name: name, value: formFieldValues[name] == null ? '' : String(formFieldValues[name]) };
     });
 
-    var context = {
-      hutk: getCookie('hubspotutk') || undefined,
-      pageUri: window.location.href,
-      pageName: document.title,
+    var payload = {
+      fields: fields,
+      context: {
+        hutk: getCookie('hubspotutk') || undefined,
+        pageUri: window.location.href,
+        pageName: document.title,
+      },
     };
 
-    function postOne(subscriptionTypeId) {
-      var payload = { fields: fields, context: context };
-      if (subscriptionTypeId) {
-        payload.legalConsentOptions = {
-          legitimateInterest: {
-            value: true,
-            subscriptionTypeId: subscriptionTypeId,
-            legalBasis: CONFIG.legitimateInterestLegalBasis || 'LEAD',
-            text: CONFIG.legitimateInterestText || '',
-          },
-        };
-      }
-      return fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).then(function (resp) {
-        if (!resp.ok) {
-          return resp.text().then(function (t) { throw new Error('HubSpot ' + resp.status + ': ' + t); });
-        }
-        return resp.json();
-      });
+    var subIds = Array.isArray(CONFIG.subscriptionTypeIds) ? CONFIG.subscriptionTypeIds : [];
+    if (subIds.length > 0) {
+      var text = CONFIG.subscriptionOptInText || '';
+      payload.legalConsentOptions = {
+        consent: {
+          consentToProcess: true,
+          text: text,
+          communications: subIds.map(function (id) {
+            return { value: true, subscriptionTypeId: id, text: text };
+          }),
+        },
+      };
     }
 
-    var subIds = Array.isArray(CONFIG.legitimateInterestSubscriptionIds)
-      ? CONFIG.legitimateInterestSubscriptionIds : [];
-    if (subIds.length === 0) {
-      // No subscriptions configured — single submit with no consent block.
-      return postOne(null);
-    }
-    // Sequential chain: each submission completes before the next starts.
-    // Sequential (not parallel) because parallel calls could race on
-    // HubSpot's contact-creation path and produce duplicate contact records
-    // if the first hasn't been deduped by the time the second arrives.
-    var chain = postOne(subIds[0]);
-    for (var i = 1; i < subIds.length; i++) {
-      (function (sid) {
-        chain = chain.then(function () { return postOne(sid); });
-      })(subIds[i]);
-    }
-    return chain;
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(function (resp) {
+      if (!resp.ok) {
+        return resp.text().then(function (t) { throw new Error('HubSpot ' + resp.status + ': ' + t); });
+      }
+      return resp.json();
+    });
   }
 
   // ---------------------------------------------------------------------------
