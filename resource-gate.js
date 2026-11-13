@@ -619,36 +619,6 @@
     console.log('[resource-gate] converted .gate-modal__submit to <button>; tabIndex=' + btn.tabIndex);
   }
 
-  // Inject a honeypot input into a form to catch bot submissions. The field
-  // is named "special_reg" (matching the existing HubSpot form field we have
-  // for this purpose) and is positioned off-screen so humans never see it.
-  // Most form-spam bots blindly fill every visible input they parse from the
-  // DOM, so they populate this field; the submit handler then aborts when it
-  // sees a value present. The field is type="text" (not type="hidden") so
-  // that bots which deliberately skip hidden inputs still get caught.
-  //
-  // Why off-screen positioning instead of CSS display:none: many bots skip
-  // any input with display:none or visibility:hidden as obviously hidden.
-  // Off-screen positioning keeps the input "rendered" from a bot's
-  // perspective. autocomplete=off + tabindex=-1 + aria-hidden ensures real
-  // users (including keyboard and screen-reader users) never reach or are
-  // told about the field.
-  function ensureHoneypotField(form) {
-    if (!form) return;
-    if (form.querySelector('input[name="special_reg"]')) return; // already present
-    var hp = document.createElement('input');
-    hp.type = 'text';
-    hp.name = 'special_reg';
-    hp.value = '';
-    hp.setAttribute('tabindex', '-1');
-    hp.setAttribute('autocomplete', 'off');
-    hp.setAttribute('aria-hidden', 'true');
-    hp.style.cssText = 'position:absolute !important;left:-9999px !important;top:-9999px !important;' +
-      'width:1px !important;height:1px !important;opacity:0 !important;pointer-events:none !important;' +
-      'border:0 !important;padding:0 !important;margin:0 !important;';
-    form.appendChild(hp);
-  }
-
   // Inject a visually-hidden <button type="submit"> into a form when no real
   // submit element is present. Defensive backstop for forms whose visible
   // submit control is a Link/div — without a real submit button, pressing
@@ -806,23 +776,12 @@
     Array.prototype.forEach.call(form.elements, function (el) {
       if (!el.name) return;
       if (el.type === 'submit' || el.type === 'button') return;
+      // Legacy honeypot field (still present on the Webflow-built LLM Prompt
+      // Access form). Browser autofill can populate it, so never block on it
+      // and never forward it to HubSpot. Bot filtering is handled by Webflow.
+      if (el.name === 'special_reg') return;
       values[el.name] = el.value;
     });
-
-    // Honeypot check. The special_reg field is positioned off-screen so a
-    // real user never sees, focuses, or fills it — but most form-spam bots
-    // auto-fill every visible input they parse from the DOM and populate it.
-    // If it has a value, abort silently: don't POST to HubSpot, don't set the
-    // gate flag, don't navigate or open a new tab. We don't show an error
-    // message because (a) real users will never see this case so the message
-    // is wasted, and (b) showing an error gives the bot operator diagnostic
-    // feedback to evade the check.
-    if (values.special_reg && String(values.special_reg).trim() !== '') {
-      console.warn('[resource-gate] honeypot tripped — submission blocked');
-      var trippedBtn = form.querySelector('[type="submit"]');
-      if (trippedBtn) { trippedBtn.disabled = false; trippedBtn.removeAttribute('aria-busy'); }
-      return;
-    }
 
     // Merge attribution — hidden field values from the form take precedence
     // if the Webflow form already has them populated; otherwise we inject.
@@ -1176,13 +1135,6 @@
     if (modalFormEl) ensureFormHasSubmitButton(modalFormEl);
     var inlineFormEl = document.querySelector('form#gate-form-inline');
     if (inlineFormEl) ensureFormHasSubmitButton(inlineFormEl);
-
-    // Inject the special_reg honeypot input into both gate forms. The
-    // existing legacy LLM Prompt Access form already has this field (and
-    // it stays where it is); these injections cover the new modal form
-    // and the new inline gate-form-inline form, neither of which had it.
-    if (modalFormEl) ensureHoneypotField(modalFormEl);
-    if (inlineFormEl) ensureHoneypotField(inlineFormEl);
 
     // Prompt copy-to-clipboard. Delegated so it works even if the [data-prompt-text]
     // element is added/replaced by Webflow's CMS bindings after init.
