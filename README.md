@@ -37,7 +37,8 @@ These values are wired into `resource-gate.js` and the architecture is locked in
 
 **Hidden (auto-populated by `resource-gate.js` on submit):**
 - `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content` — current-session UTMs
-- `special_reg`, `recent_snack_id` — kept from existing form for marketing data continuity (script populates with empty string unless overridden)
+- `recent_snack_id` — kept from existing form for marketing data continuity (sent from `CONFIG.recentSnackId`)
+- `special_reg` — **no longer used** (as of v1.0.33). It was a honeypot field; the script now ignores it if present and never sends it to HubSpot. See [Version history](#version-history).
 
 **Hidden (auto-populated by HubSpot via `context` block):**
 - `hutk` (HubSpot tracking cookie)
@@ -64,7 +65,7 @@ These values are wired into `resource-gate.js` and the architecture is locked in
 
 5. **Build the gate modal Symbol** in Webflow Designer. Required structure:
    - Modal root: `id="gate-modal"`, hidden by default.
-   - Form: `id="gate-modal-form"` containing visible inputs `name="Email"`/`name="firstname"`/`name="lastname"`, a submit button, plus hidden inputs for `utm_*`, `special_reg`, `recent_snack_id`. Hidden inputs are optional — the script auto-injects values for any that aren't present.
+   - Form: `id="gate-modal-form"` containing visible inputs `name="Email"`/`name="firstname"`/`name="lastname"`, a submit button, plus hidden inputs for `utm_*`, `recent_snack_id`. Hidden inputs are optional — the script auto-injects values for any that aren't present.
    - Fallback container: `<div id="gate-fallback-link" hidden><a href="">Click here if your page didn't open</a></div>`. Script sets the `href` after an external-tile submit.
 6. **Update the CMS template's external-link branch** (`AI Prompt Libraries Template`, page id `69a5d7d936e95ee4c4555948`):
    - Add `data-gate-page="true"` on body.
@@ -101,6 +102,22 @@ Production publish requires explicit user approval per the publishing rule above
 11. **Attribution round-trip.** Open staging URL with `?utm_source=test&utm_medium=plan-verify&utm_campaign=gate`. Click a tile. Submit. In the HubSpot contact record, confirm `hs_analytics_source`, drill-downs, `hs_analytics_first_referring_domain`, etc. populated; UTMs from the submission appear under HubSpot's first/last UTM properties.
 12. **No console errors** on any page. Network: 200 from `api.hsforms.com/submissions/...`, 200 from `js.hs-scripts.com/21795561.js`, 200 from `track.hubspot.com`.
 13. **Pixel-fidelity spot check.** Compare staging pages to design screenshots `01-05`. Document deltas.
+
+---
+
+## Version history
+
+Webflow loads the script from a pinned jsDelivr tag:
+`https://cdn.jsdelivr.net/gh/sarah-sb-work/webflow-form_gating-prompt_library@vX.Y.Z/resource-gate.js`.
+Pushing to `main` does not change the live site; only changing the tag in Webflow custom code and publishing does. To roll back, point the script back at the previous tag and republish.
+
+### v1.0.33 — 2026-11-16 — Remove honeypot (autofill fix)
+
+- **Problem:** Visitors who used browser autofill could not submit the gate form. Clicking Submit did nothing; the console showed `[resource-gate] honeypot tripped — submission blocked`. Manual entry worked.
+- **Cause:** The script injected an off-screen `special_reg` text input as a bot honeypot. Chrome, Edge and password managers ignore `autocomplete="off"` and sometimes fill hidden fields, so real people tripped it and the submit silently aborted.
+- **Fix:** Removed the honeypot injection (`ensureHoneypotField`) and the submit-blocking check. Any `special_reg` field still present (e.g. on the legacy Webflow-built LLM Prompt Access form) is skipped and not sent to HubSpot. Bot filtering is now handled by Webflow's built-in bot protection.
+- **Rollback:** Point the Webflow script back to `@v1.0.32` and republish (restores the honeypot and the autofill problem).
+- **Optional cleanup:** Delete the `special_reg` field from the legacy LLM Prompt Access form in Webflow Designer.
 
 ---
 
